@@ -17,3 +17,11 @@ uv.lock
 
 __pycache__/
 *.so
+
+benchmark
+
+.vscode
+
+data/000001/
+
+*.gz
