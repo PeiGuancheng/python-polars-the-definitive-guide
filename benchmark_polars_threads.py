@@ -9,7 +9,7 @@ import benchmark_stock_minutes as benchmark
 
 
 def main():
-    """选择约 8 GiB 数据，交替测试线程数并核验全部结果。"""
+    """选择小样本或复用文件清单，交替测试线程数并核验结果。"""
     args = benchmark.parse_arguments()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     folder = pathlib.Path(__file__).resolve().parent / "benchmark"
@@ -28,11 +28,17 @@ def main():
         size_bytes += path.stat().st_size
         if size_bytes >= 8 * 2**30:
             break
-    if not 5 * 2**30 <= size_bytes <= 10 * 2**30:
+    if args.manifest:
+        source_info = json.loads(
+            pathlib.Path(args.manifest).read_text(encoding="utf-8")
+        )
+        selected = source_info["files"]
+        size_bytes = sum(pathlib.Path(path).stat().st_size for path in selected)
+    elif not 5 * 2**30 <= size_bytes <= 10 * 2**30:
         raise ValueError("2025 年文件无法组成 5–10 GiB 的测试样本")
 
     # 复用原基准的字段发现和版本记录，保留选定的全部文件。
-    args.target_gib = 5
+    args.target_gib = min(5, size_bytes / 2**30 * 0.99)
     args.repeats = 2
     manifest = benchmark.prepare_manifest(
         args, folder, input_files=[pathlib.Path(path) for path in selected]
@@ -53,14 +59,15 @@ def main():
     print(f"文件范围：{selected[0]} 至 {selected[-1]}", flush=True)
     print(f"结果目录：{folder}", flush=True)
 
-    print("先用 4 线程预热文件缓存；预热不计入正式对照", flush=True)
-    args.threads = 4
-    warmup = benchmark.measure(
-        args, manifest, "polars", folder / "warmup_4threads.parquet"
-    )
-    benchmark.write_json(folder / "warmup.json", warmup)
-    if warmup["status"] != "ok":
-        raise RuntimeError("预热失败，请检查日志")
+    if size_bytes <= 10 * 2**30:
+        print("先用 4 线程预热文件缓存；预热不计入正式对照", flush=True)
+        args.threads = 4
+        warmup = benchmark.measure(
+            args, manifest, "polars", folder / "warmup_4threads.parquet"
+        )
+        benchmark.write_json(folder / "warmup.json", warmup)
+        if warmup["status"] != "ok":
+            raise RuntimeError("预热失败，请检查日志")
 
     records = []
     reference = None
